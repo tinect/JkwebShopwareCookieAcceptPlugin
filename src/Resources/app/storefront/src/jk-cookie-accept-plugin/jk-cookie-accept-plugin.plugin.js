@@ -1,18 +1,19 @@
 import Plugin from 'src/plugin-system/plugin.class';
 import { COOKIE_CONFIGURATION_UPDATE } from 'src/plugin/cookie/cookie-configuration.plugin';
-import LoadingIndicator from 'src/utility/loading-indicator/loading-indicator.util';
+import ElementLoadingIndicatorUtil from 'src/utility/loading-indicator/element-loading-indicator.util';
 import HttpClient from 'src/service/http-client.service';
 import CookieStorage from 'src/helper/storage/cookie-storage.helper';
 
 export default class JkCookieAcceptPlugin extends Plugin {
     static options = {
         acceptButtonSelector: '.js-cookie-accept-button',
-        acceptButtonLoadingIndicatorSelector: '.js-cookie-accept-button-loading-indicator',
-        cookieSelector: '[data-cookie]',
-        cookiePreference: 'cookie-preference'
+        acceptButtonLoadingIndicatorSelector: '.js-cookie-accept-button-loading-indicator'
     };
 
     init() {
+        const me = this;
+        me.cookieConfiguration = window.PluginManager.getPluginInstances('CookieConfiguration')[0];
+
         document.$emitter.subscribe(COOKIE_CONFIGURATION_UPDATE, (ev) => {
             const detail = ev.detail;
             for (const cookie in detail) {
@@ -34,22 +35,26 @@ export default class JkCookieAcceptPlugin extends Plugin {
             }
         });
 
-        const { acceptButtonSelector, acceptButtonLoadingIndicatorSelector, cookiePreference } = this.options;
-        const that = this;
+        const button = document.querySelector(this.options.acceptButtonSelector + ':not(.disabled)');
+        me._registerClickEvent(button);
+    }
 
-        $(acceptButtonSelector + ':not(.disabled)').on('click', function() {
-            const cookieConfiguration = window.PluginManager.getPluginInstances('CookieConfiguration')[0];
-            const $btn = $(this).find('button');
-            $btn.addClass('disabled');
-            const $loadingIndicator = $btn.find(acceptButtonLoadingIndicatorSelector);
-            $loadingIndicator.html(`<span class="offcanvas-content-container">${LoadingIndicator.getTemplate()}</span>`);
+    _registerClickEvent(el) {
+        el.addEventListener('click', () => {
+            const me = this;
+
+            const btn = el.querySelector('button');
+            btn.classList.add('disabled');
+
+            const loadingIndicatorElement = btn.querySelector(this.options.acceptButtonLoadingIndicatorSelector);
+            ElementLoadingIndicatorUtil.create(loadingIndicatorElement);
 
             const url = window.router['frontend.cookie.offcanvas'];
             const client = new HttpClient(window.accessKey, window.contextToken);
             client.get(url, (data) => {
                 const dataContext = $(`<div>${data}</div>`);
-                that._setInitialState(dataContext, cookieConfiguration);
-                const activeCookies = that._getCookies(dataContext, cookieConfiguration, 'all');
+                me._setInitialState(dataContext, me.cookieConfiguration);
+                const activeCookies = me._getCookies(dataContext, me.cookieConfiguration, 'all');
                 const activeCookieNames = [];
 
                 activeCookies.forEach(({ cookie, value, expiration }) => {
@@ -60,19 +65,19 @@ export default class JkCookieAcceptPlugin extends Plugin {
                     }
                 });
 
-                CookieStorage.setItem(cookiePreference, '1', '30');
+                CookieStorage.setItem(me.cookieConfiguration.options.cookiePreference, '1', 30);
 
-                cookieConfiguration._handleUpdateListener(activeCookieNames, []);
+                me.cookieConfiguration._handleUpdateListener(activeCookieNames, []);
 
-                $btn.removeClass('disabled');
-                $loadingIndicator.html('');
-                cookieConfiguration._hideCookieBar();
+                btn.classList.remove('disabled');
+                ElementLoadingIndicatorUtil.remove(loadingIndicatorElement);
+                me.cookieConfiguration._hideCookieBar();
 
                 if (window.COOKIE_ACCEPT_RELOAD === 1) {
                     location.reload();
                 }
             });
-        });
+        }, false);
     }
 
     _setInitialState(ctx, cookieConfiguration) {
@@ -95,7 +100,7 @@ export default class JkCookieAcceptPlugin extends Plugin {
         };
 
         activeCookies.forEach(activeCookie => {
-            const target = $(`[data-cookie="${activeCookie}"]`, ctx)[0];
+            const target = document.querySelector(`[data-cookie="${activeCookie}"]`);
 
             target.checked = true;
             cookieConfiguration._childCheckboxEvent(target);
@@ -103,9 +108,7 @@ export default class JkCookieAcceptPlugin extends Plugin {
     }
 
     _getCookies(ctx, cookieConfiguration, type = 'all') {
-        const { cookieSelector } = this.options;
-
-        return Array.from($(cookieSelector, ctx)).filter(cookieInput => {
+        return Array.from($(this.cookieConfiguration.options.cookieSelector, ctx)).filter(cookieInput => {
             switch (type) {
                 case 'all': return true;
                 case 'active': return cookieConfiguration._isChecked(cookieInput);
